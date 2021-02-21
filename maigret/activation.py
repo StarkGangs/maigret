@@ -28,10 +28,11 @@ class ParsingActivator:
         r = requests.get(site.activation['url'], headers=headers)
         try:
            jwt_token = r.json()['jwt']
+           site.headers['Authorization'] = 'jwt ' + jwt_token
+
         except:
            pass
-        site.headers['Authorization'] = 'jwt ' + jwt_token
-
+        
     @staticmethod
     def spotify(site, logger, cookies={}):
         headers = dict(site.headers)
