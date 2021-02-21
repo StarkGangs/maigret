@@ -2,11 +2,21 @@
 """Maigret Sites Information"""
 import copy
 import json
+import re
 import sys
 
 import requests
 
-from .utils import CaseConverter
+from .utils import CaseConverter, URLMatcher, is_country_tag
+
+# TODO: move to data.json
+SUPPORTED_TAGS = [
+    'gaming', 'coding', 'photo', 'music', 'blog', 'finance', 'freelance', 'dating',
+    'tech', 'forum', 'porn', 'erotic', 'webcam', 'video', 'movies', 'hacking', 'art',
+    'discussion', 'sharing', 'writing', 'wiki', 'business', 'shopping', 'sport',
+    'books', 'news', 'documents', 'travel', 'maps', 'hobby', 'apps', 'classified',
+    'career', 'geosocial', 'streaming', 'education', 'networking', 'torrent',
+]
 
 
 class MaigretEngine:
@@ -21,6 +31,16 @@ class MaigretEngine:
 
 
 class MaigretSite:
+    NOT_SERIALIZABLE_FIELDS = [
+        'name',
+        'engineData',
+        'requestFuture',
+        'detectedEngine',
+        'engineObj',
+        'stats',
+        'urlRegexp',
+    ]
+
     def __init__(self, name, information):
         self.name = name
 
@@ -57,9 +77,28 @@ class MaigretSite:
             # We do not know the popularity, so make site go to bottom of list.
             self.alexa_rank = sys.maxsize
 
+        self.update_detectors()
 
     def __str__(self):
         return f"{self.name} ({self.url_main})"
+
+    def update_detectors(self):
+        if 'url' in self.__dict__:
+            url = self.url
+            for group in ['urlMain', 'urlSubpath']:
+                if group in url:
+                    url = url.replace('{'+group+'}', self.__dict__[CaseConverter.camel_to_snake(group)])
+
+            self.url_regexp = URLMatcher.make_profile_url_regexp(url, self.regex_check)
+
+    def detect_username(self, url: str) -> str:
+        if self.url_regexp:
+            import logging
+            match_groups = self.url_regexp.match(url)
+            if match_groups:
+                return match_groups.groups()[-1].rstrip('/')
+
+        return None
 
     @property
     def json(self):
@@ -70,7 +109,7 @@ class MaigretSite:
             # strip empty elements
             if v in (False, '', [], {}, None, sys.maxsize, 'username'):
                 continue
-            if field in ['name', 'engineData', 'requestFuture', 'detectedEngine', 'engineObj', 'stats']:
+            if field in self.NOT_SERIALIZABLE_FIELDS:
                 continue
             result[field] = v
 
@@ -78,6 +117,7 @@ class MaigretSite:
 
     def update(self, updates: dict) -> MaigretSite:
         self.__dict__.update(updates)
+        self.update_detectors()
 
         return self
 
@@ -95,6 +135,7 @@ class MaigretSite:
                 self.__dict__[field] = v
 
         self.engine_obj = engine
+        self.update_detectors()
 
         return self
 
@@ -103,6 +144,8 @@ class MaigretSite:
             return self
 
         self.request_future = None
+        self.url_regexp = None
+
         self_copy = copy.deepcopy(self)
         engine_data = self_copy.engine_obj.site
         site_data_keys = list(self_copy.__dict__.keys())
@@ -277,7 +320,7 @@ class MaigretDatabase:
 
         return self.load_from_json(data)
 
-    def get_stats(self, sites_dict):
+    def get_scan_stats(self, sites_dict):
         sites = sites_dict or self.sites_dict
         found_flags = {}
         for _, s in sites.items():
@@ -286,3 +329,52 @@ class MaigretDatabase:
                 found_flags[flag] = found_flags.get(flag, 0) + 1
 
         return found_flags
+
+    def get_db_stats(self, sites_dict):
+        if not sites_dict:
+            sites_dict = self.sites_dict()
+
+        output = ''
+        disabled_count = 0
+        total_count = len(sites_dict)
+        urls = {}
+        tags = {}
+
+        for _, site in sites_dict.items():
+            if site.disabled:
+                disabled_count += 1
+
+            url = URLMatcher.extract_main_part(site.url)
+            if url.startswith('{username}'):
+                url = 'SUBDOMAIN'
+            elif url == '':
+                url = f'{site.url} ({site.engine})'
+            else:
+                parts = url.split('/')
+                url = '/' + '/'.join(parts[1:])
+
+            urls[url] = urls.get(url, 0) + 1
+
+            if not site.tags:
+                tags['NO_TAGS'] = tags.get('NO_TAGS', 0) + 1
+
+            for tag in site.tags:
+                if is_country_tag(tag):
+                    # currenty do not display country tags
+                    continue
+                tags[tag] = tags.get(tag, 0) + 1
+
+        output += f'Enabled/total sites: {total_count-disabled_count}/{total_count}\n'
+        output += 'Top sites\' profile URLs:\n'
+        for url, count in sorted(urls.items(), key=lambda x: x[1], reverse=True)[:20]:
+            if count == 1:
+                break
+            output += f'{count}\t{url}\n'
+        output += 'Top sites\' tags:\n'
+        for tag, count in sorted(tags.items(), key=lambda x: x[1], reverse=True):
+            mark = ''
+            if not tag in SUPPORTED_TAGS:
+                mark = ' (non-standard)'
+            output += f'{count}\t{tag}{mark}\n'
+
+        return output

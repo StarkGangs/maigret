@@ -20,6 +20,7 @@ supported_recursive_search_ids = (
     'vk_id',
     'ok_id',
     'wikimapia_uid',
+    'steam_id',
 )
 
 common_errors = {
@@ -97,7 +98,7 @@ async def update_site_dict_from_response(sitename, site_dict, results_info, sema
         site_dict[sitename] = process_site_result(response, query_notify, logger, results_info, site_obj)
 
 
-# TODO: move info separate module
+# TODO: move to separate class
 def detect_error_page(html_text, status_code, fail_flags, ignore_403):
     # Detect service restrictions such as a country restriction
     for flag, msg in fail_flags.items():
@@ -270,6 +271,7 @@ def process_site_result(response, query_notify, logger, results_info, site: Maig
                     new_usernames[v] = k
 
             results_info['ids_usernames'] = new_usernames
+            results_info['ids_links'] = eval(extracted_ids_data.get('links', '[]'))
             result.ids_data = extracted_ids_data
 
     # Notify caller about results of query.
@@ -331,6 +333,7 @@ async def maigret(username, site_dict, query_notify, logger,
 
     cookie_jar = None
     if cookies:
+        logger.debug(f'Using cookies jar file {cookies}')
         cookie_jar = await import_aiohttp_cookies(cookies)
 
     session = aiohttp.ClientSession(connector=connector, trust_env=True, cookie_jar=cookie_jar)
