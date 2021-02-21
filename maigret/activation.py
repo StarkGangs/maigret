@@ -26,7 +26,10 @@ class ParsingActivator:
         if 'Authorization' in headers:
             del headers['Authorization']
         r = requests.get(site.activation['url'], headers=headers)
-        jwt_token = r.json()['jwt']
+        try:
+           jwt_token = r.json()['jwt']
+        except:
+           pass
         site.headers['Authorization'] = 'jwt ' + jwt_token
 
     @staticmethod
